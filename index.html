@@ -606,7 +606,25 @@ function renderCatPills() {
   const safeCat = (s) => String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
   row.innerHTML = CATEGORIES.map(c => `<button type="button" class="btn${activeCat===c?' active':''}" style="font-size:7px" data-cat="${safeCat(c)}">${CAT_ICON[c]} ${c}</button>`).join('');
 }
-window.setCat = (c) => { activeCat = c; renderCatPills(); if(lastSearched||document.getElementById('search-input').value.trim()) doSearch(); else showHome(); };
+window.setCat = (c) => {
+  activeCat = c;
+
+  if (c === 'All') {
+    renderCatPills();
+    showHome();
+    return;
+  }
+
+  renderCatPills();
+
+  const q = document.getElementById('search-input')?.value.trim() || '';
+
+  if (q || lastSearched || c !== 'All') {
+    doSearch();
+  } else {
+    showHome(true);
+  }
+};
 
 // Delegated clicks for category filters (header pills + home page "BROWSE BY CATEGORY" cards)
 document.getElementById('header-inner')?.addEventListener('click', (e) => {
@@ -634,9 +652,9 @@ function renderFooter() {
   foot.innerHTML = `⛏ Minecraft Wiki • <span id="footer-count">${entries.length}</span> entries • ${currentUser ? 'Logged in as ' + currentUser.email : 'Read-only mode'}`;
 }
 
-window.showHome = () => {
+window.showHome = (preserveCategory = false) => {
   lastSearched = false;
-  activeCat = 'All';
+  if (!preserveCategory) activeCat = 'All';
   renderCatPills();
   setView('home');
   const el = document.getElementById('view-home');
