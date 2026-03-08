@@ -325,7 +325,6 @@ import { getFirestore, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, q
 
 // ─── PASTE YOUR FIREBASE CONFIG HERE ───────────────────────
 const firebaseConfig = {
-const firebaseConfig = {
   apiKey: "AIzaSyCvdhGskqQXfK-BJ1J8MlCMVCjnR9-m8fQ",
   authDomain: "minecraft-wiki-650dd.firebaseapp.com",
   projectId: "minecraft-wiki-650dd",
@@ -335,9 +334,16 @@ const firebaseConfig = {
 };
 // ───────────────────────────────────────────────────────────
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+let app, auth, db;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.error('Firebase init failed:', e);
+  db = null;
+  auth = null;
+}
 
 // ─── CONSTANTS ──────────────────────────────────────────────
 const CATEGORIES = ["All","Version History","Crafting Recipes","Achievements","Mobs","Biomes","Blocks","Items","Dimensions","Mechanics","Commands","Structures","Other"];
@@ -416,7 +422,7 @@ function toast(msg, type='ok') {
 }
 
 // ─── AUTH ────────────────────────────────────────────────────
-onAuthStateChanged(auth, user => {
+if (auth) onAuthStateChanged(auth, user => {
   currentUser = user;
   const show = id => document.getElementById(id).style.display = '';
   const hide = id => document.getElementById(id).style.display = 'none';
@@ -605,10 +611,9 @@ function setView(name) {
 }
 
 function renderFooter() {
-  const footCount = document.getElementById('footer-count');
+  document.getElementById('footer-count').textContent = entries.length;
   const foot = document.getElementById('footer');
-  if (footCount) footCount.textContent = entries.length;
-  if (foot) foot.textContent = `⛏ Minecraft Wiki • ${entries.length} entries • ${currentUser?'Logged in as '+currentUser.email:'Read-only mode'}`;
+  foot.textContent = `⛏ Minecraft Wiki • ${entries.length} entries • ${currentUser?'Logged in as '+currentUser.email:'Read-only mode'}`;
 }
 
 window.showHome = () => {
@@ -836,9 +841,16 @@ window.addMetaRow = () => { metaRows.push({key:'',val:''}); renderMetaEditor(); 
 window.removeMeta = (i) => { metaRows.splice(i,1); renderMetaEditor(); };
 
 // ─── INIT ────────────────────────────────────────────────────
-renderCatPills();
-showHome();
-loadEntries();
+if (db) {
+  renderCatPills();
+  showHome();
+  loadEntries();
+} else {
+  entries = SEED.map((s, i) => ({ ...s, id: 'seed-' + i }));
+  renderCatPills();
+  renderFooter();
+  showHome();
+}
 
 </script>
 </body>
