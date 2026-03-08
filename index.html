@@ -325,6 +325,7 @@ import { getFirestore, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, q
 
 // ─── PASTE YOUR FIREBASE CONFIG HERE ───────────────────────
 const firebaseConfig = {
+const firebaseConfig = {
   apiKey: "AIzaSyCvdhGskqQXfK-BJ1J8MlCMVCjnR9-m8fQ",
   authDomain: "minecraft-wiki-650dd.firebaseapp.com",
   projectId: "minecraft-wiki-650dd",
@@ -604,9 +605,10 @@ function setView(name) {
 }
 
 function renderFooter() {
-  document.getElementById('footer-count').textContent = entries.length;
+  const footCount = document.getElementById('footer-count');
   const foot = document.getElementById('footer');
-  foot.textContent = `⛏ Minecraft Wiki • ${entries.length} entries • ${currentUser?'Logged in as '+currentUser.email:'Read-only mode'}`;
+  if (footCount) footCount.textContent = entries.length;
+  if (foot) foot.textContent = `⛏ Minecraft Wiki • ${entries.length} entries • ${currentUser?'Logged in as '+currentUser.email:'Read-only mode'}`;
 }
 
 window.showHome = () => {
