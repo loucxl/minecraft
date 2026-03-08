@@ -416,18 +416,20 @@ function escHtml(s) {
 // ─── TOAST ───────────────────────────────────────────────────
 function toast(msg, type='ok') {
   const el = document.getElementById('toast');
+  if (!el) return;
   el.className = type; el.textContent = (type==='ok'?'✅ ':'⚠️ ') + msg;
   el.style.display = 'block';
-  setTimeout(() => el.style.display = 'none', 3000);
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
 
 // ─── AUTH ────────────────────────────────────────────────────
 if (auth) onAuthStateChanged(auth, user => {
   currentUser = user;
-  const show = id => document.getElementById(id).style.display = '';
-  const hide = id => document.getElementById(id).style.display = 'none';
+  const show = id => { const el = document.getElementById(id); if (el) el.style.display = ''; };
+  const hide = id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
   if (user) {
-    document.getElementById('user-email').textContent = '🟢 ' + user.email;
+    const emailEl = document.getElementById('user-email');
+    if (emailEl) emailEl.textContent = '🟢 ' + user.email;
     show('user-email'); show('btn-add'); show('btn-bulk'); show('btn-new-user'); show('btn-logout');
     hide('btn-login');
   } else {
@@ -565,10 +567,14 @@ window.closeBulk = () => { document.getElementById('bulk-modal').style.display='
 window.doBulkImport = async () => {
   const raw = document.getElementById('bulk-input').value.trim();
   const errEl = document.getElementById('bulk-error');
-  errEl.style.display='none';
+  const setBulkError = (msg) => {
+    if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+    else toast(msg, 'err');
+  };
+  if (errEl) errEl.style.display = 'none';
   let parsed;
-  try { parsed = JSON.parse(raw); } catch(e) { errEl.textContent='Invalid JSON. Check your formatting — make sure it starts with [ and ends with ]'; errEl.style.display='block'; return; }
-  if (!Array.isArray(parsed)) { errEl.textContent='Must be a JSON array starting with ['; errEl.style.display='block'; return; }
+  try { parsed = JSON.parse(raw); } catch(e) { setBulkError('Invalid JSON. Check your formatting — make sure it starts with [ and ends with ]'); return; }
+  if (!Array.isArray(parsed)) { setBulkError('Must be a JSON array starting with ['); return; }
 
   try {
     const batch = writeBatch(db);
@@ -590,15 +596,27 @@ window.doBulkImport = async () => {
     await loadEntries();
     closeBulk();
     toast('Imported '+parsed.length+' entries!');
-  } catch(e) { errEl.textContent='Import failed: '+e.message; errEl.style.display='block'; }
+  } catch(e) { setBulkError('Import failed: ' + e.message); }
 };
 
 // ─── CATEGORY PILLS ──────────────────────────────────────────
 function renderCatPills() {
   const row = document.getElementById('cat-row');
-  row.innerHTML = CATEGORIES.map(c => `<button class="btn${activeCat===c?' active':''}" style="font-size:7px" onclick="setCat('${c}')">${CAT_ICON[c]} ${c}</button>`).join('');
+  if (!row) return;
+  const safeCat = (s) => String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  row.innerHTML = CATEGORIES.map(c => `<button type="button" class="btn${activeCat===c?' active':''}" style="font-size:7px" data-cat="${safeCat(c)}">${CAT_ICON[c]} ${c}</button>`).join('');
 }
 window.setCat = (c) => { activeCat = c; renderCatPills(); if(lastSearched||document.getElementById('search-input').value.trim()) doSearch(); else showHome(); };
+
+// Delegated clicks for category filters (header pills + home page "BROWSE BY CATEGORY" cards)
+document.getElementById('header-inner')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('#cat-row button[data-cat]');
+  if (btn) setCat(btn.getAttribute('data-cat'));
+});
+document.getElementById('main')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.cat-card[data-cat]');
+  if (card) setCat(card.getAttribute('data-cat'));
+});
 
 // ─── VIEWS ───────────────────────────────────────────────────
 function setView(name) {
@@ -611,9 +629,9 @@ function setView(name) {
 }
 
 function renderFooter() {
-  document.getElementById('footer-count').textContent = entries.length;
   const foot = document.getElementById('footer');
-  foot.textContent = `⛏ Minecraft Wiki • ${entries.length} entries • ${currentUser?'Logged in as '+currentUser.email:'Read-only mode'}`;
+  if (!foot) return;
+  foot.innerHTML = `⛏ Minecraft Wiki • <span id="footer-count">${entries.length}</span> entries • ${currentUser ? 'Logged in as ' + currentUser.email : 'Read-only mode'}`;
 }
 
 window.showHome = () => {
@@ -627,15 +645,16 @@ window.showHome = () => {
     cat:c, count:entries.filter(e=>e.category===c).length
   }));
 
+  const safeId = (id) => String(id).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   const recentHtml = [...entries].slice(0,6).map(e => `
-    <div class="recent-card" onclick="openArticle('${e.id}')">
+    <div class="recent-card" onclick="openArticle('${safeId(e.id)}')">
       <div style="font-size:18px;margin-bottom:6px">${CAT_ICON[e.category]||'📄'}</div>
       <div class="recent-title">${escHtml(e.title)}</div>
       <div class="recent-cat">${escHtml(e.category)}</div>
       <div class="recent-summary">${escHtml(e.summary||'')}</div>
       ${currentUser?`<div class="card-actions" onclick="event.stopPropagation()">
-        <button class="btn sm" onclick="showForm('${e.id}')">✏️ Edit</button>
-        <button class="btn sm danger" onclick="openConfirm('${e.id}')">🗑️</button>
+        <button class="btn sm" onclick="showForm('${safeId(e.id)}')">✏️ Edit</button>
+        <button class="btn sm danger" onclick="openConfirm('${safeId(e.id)}')">🗑️</button>
       </div>`:''}
     </div>
   `).join('');
@@ -648,11 +667,13 @@ window.showHome = () => {
       <div class="stat-card"><div style="font-size:24px;margin-bottom:6px">📅</div><div class="stat-val">${entries.filter(e=>e.category==='Version History').length}</div><div class="stat-label">Versions</div></div>
     </div>
     <div class="section-title">BROWSE BY CATEGORY</div>
-    <div id="cat-grid">${byCat.map(({cat,count})=>`
-      <div class="cat-card" onclick="setCat('${cat}')">
+    <div id="cat-grid">${byCat.map(({cat,count})=>{
+      const ac = String(cat).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      return `<div class="cat-card" data-cat="${ac}">
         <span style="font-size:20px">${CAT_ICON[cat]}</span>
-        <div><div class="cat-name">${cat}</div><div class="cat-count">${count} entries</div></div>
-      </div>`).join('')}
+        <div><div class="cat-name">${escHtml(cat)}</div><div class="cat-count">${count} entries</div></div>
+      </div>`;
+    }).join('')}
     </div>
     <div class="section-title">RECENT ENTRIES</div>
     <div id="recent-grid">${recentHtml}</div>
