@@ -1115,7 +1115,7 @@ window.admDelete = async () => {
 async function admCallGemini(prompt) {
   const key = document.getElementById('adm-gemini-key').value.trim();
   if (!key) throw new Error('No Gemini API key — paste it above');
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`, {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.2,maxOutputTokens:1500}})
   });
