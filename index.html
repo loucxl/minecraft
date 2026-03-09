@@ -342,7 +342,7 @@
       <div style="background:var(--bg2);border:1px solid var(--border);margin-bottom:16px">
         <div style="background:#050d05;border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between">
           <span class="px" style="font-size:7px;color:var(--green3)">🤖 AI ENTRY GENERATOR</span>
-          <span style="font-family:'VT323',monospace;font-size:14px;padding:2px 8px;border:1px solid #226688;color:#44aadd;background:#040a0e">GEMINI FREE</span>
+          <span style="font-family:'VT323',monospace;font-size:14px;padding:2px 8px;border:1px solid #226688;color:#44aadd;background:#040a0e">GEMINI API</span>
         </div>
         <div style="padding:16px">
           <div style="background:#04090a;border:1px solid #226688;padding:10px 12px;margin-bottom:12px">
@@ -380,8 +380,9 @@
           <div id="adm-thinking" style="display:none;margin-bottom:12px;font-family:'VT323',monospace;color:var(--green4);font-size:17px">⏳ Gemini is thinking...</div>
           <div id="adm-fields"></div>
           <div id="adm-dup-section" style="display:none;margin-bottom:14px">
-            <div class="px" style="font-size:6px;color:var(--green5);margin-bottom:8px">⚠ POSSIBLE DUPLICATES</div>
+            <div class="px" style="font-size:6px;color:var(--green5);margin-bottom:8px">⚠ POSSIBLE DUPLICATES — CLICK TO REVIEW</div>
             <div id="adm-dup-list" style="background:#0a0804;border:1px solid #aa7700"></div>
+            <div id="adm-dup-preview" style="display:none;margin-top:8px;background:#050d05;border:1px solid var(--border);padding:10px 12px"></div>
           </div>
           <div id="adm-factcheck-section" style="display:none;margin-bottom:14px">
             <div class="px" style="font-size:6px;color:var(--green5);margin-bottom:8px">🔍 FACT CHECK</div>
@@ -1112,17 +1113,117 @@ window.admDelete = async () => {
   } catch(e) { toast('Delete failed: '+e.message, 'err'); }
 };
 
+function admExtractJson(text) {
+  if (!text) throw new Error('Gemini returned an empty response.');
+
+  const cleaned = text
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  const starts = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (ch === '{' || ch === '[') starts.push(i);
+  }
+
+  for (const start of starts) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let opener = cleaned[start];
+    let closer = opener === '{' ? '}' : ']';
+
+    for (let i = start; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+
+      if (inString) {
+        if (escape) {
+          escape = false;
+        } else if (ch === '\\') {
+          escape = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === opener) depth++;
+      if (ch === closer) depth--;
+
+      if (depth === 0) {
+        const candidate = cleaned.slice(start, i + 1).trim();
+        try {
+          return JSON.parse(candidate);
+        } catch {}
+      }
+    }
+  }
+
+  throw new Error('Gemini returned invalid JSON. Please try again.');
+}
+
 async function admCallGemini(prompt) {
   const key = document.getElementById('adm-gemini-key').value.trim();
   if (!key) throw new Error('No Gemini API key — paste it above');
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`, {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.2,maxOutputTokens:1500}})
-  });
-  if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err?.error?.message||`Gemini error ${res.status}`); }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return JSON.parse(text.replace(/```json|```/g,'').trim());
+
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `${prompt}\n\nReturn JSON only. Do not include markdown fences, notes, or commentary before or after the JSON.`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 1200,
+            responseMimeType: 'application/json'
+          }
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const message = errData?.error?.message || `Gemini error ${res.status}`;
+
+        if (res.status === 429 || /quota|rate limit|resource_exhausted/i.test(message)) {
+          throw new Error('Gemini quota/rate limit reached for this API key. Please wait a bit, use a different key/project, or enable billing in Google AI Studio / Google Cloud for higher limits.');
+        }
+
+        if (res.status === 404 || /not found|not supported/i.test(message)) {
+          lastError = new Error(message);
+          continue;
+        }
+
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return admExtractJson(rawText);
+    } catch (err) {
+      lastError = err;
+      if (/quota|rate limit/i.test(err.message)) throw err;
+    }
+  }
+
+  throw lastError || new Error('All Gemini models failed.');
 }
 
 window.admSaveKey = () => {
@@ -1140,15 +1241,21 @@ window.admGenerate = async () => {
   document.getElementById('adm-thinking').style.display = '';
   document.getElementById('adm-fields').innerHTML = '';
   document.getElementById('adm-dup-section').style.display = 'none';
+  document.getElementById('adm-dup-preview').style.display = 'none';
+  document.getElementById('adm-dup-preview').innerHTML = '';
   document.getElementById('adm-factcheck-section').style.display = 'none';
   document.getElementById('adm-btn-gen').disabled = true;
 
   try {
-    const prompt = `You are a Minecraft wiki editor. Format this into a wiki entry.
+    const prompt = `You are a Minecraft wiki editor.
+Rewrite the source material into fresh, original wiki wording while keeping the factual meaning.
+Do not copy sentences or closely mirror the phrasing of the source text.
+Summarise, restructure, and rephrase the material so it reads like a newly written entry.
+Keep it accurate, concise, neutral, and Minecraft-focused.
 Return ONLY valid JSON, no markdown:
-{"title":"...","category":"One of: ${cats.join(', ')}","summary":"one sentence max 120 chars","content":"full detailed content","tags":["tag1","tag2"],"related":["Title1"],"metadata":{"Key":"Value"}}
+{"title":"...","category":"One of: ${cats.join(', ')}","summary":"one sentence max 120 chars, original wording","content":"full detailed content in original wording","tags":["tag1","tag2"],"related":["Title1"],"metadata":{"Key":"Value"}}
 ${catHint?`Category hint: "${catHint}"`:''}
-Data: ${raw}`;
+Source material to rewrite: ${raw}`;
 
     admGenerated = await admCallGemini(prompt);
     document.getElementById('adm-thinking').style.display = 'none';
@@ -1174,16 +1281,71 @@ function admRenderGenerated(e) {
     </div>`).join('');
 }
 
+function admDupReasons(generated, existing, score) {
+  const reasons = [];
+  if ((generated.title||'').toLowerCase() === (existing.title||'').toLowerCase()) reasons.push('same title');
+  if (generated.category && existing.category && generated.category === existing.category) reasons.push('same category');
+  const sharedTags = (generated.tags||[]).filter(t => (existing.tags||[]).some(x => String(x).toLowerCase() === String(t).toLowerCase()));
+  if (sharedTags.length) reasons.push('shared tags: ' + sharedTags.slice(0,3).join(', '));
+  if (score >= 0.9) reasons.push('very similar title');
+  else if (score >= 0.75) reasons.push('similar title');
+  return reasons;
+}
+
+window.admPreviewDup = (id) => {
+  const preview = document.getElementById('adm-dup-preview');
+  const existing = entries.find(x => x.id === id);
+  if (!existing || !admGenerated) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+    return;
+  }
+
+  const reasons = admDupReasons(admGenerated, existing, admSim((admGenerated.title||'').toLowerCase(), (existing.title||'').toLowerCase()));
+  const openCall = `admShowDetail(${JSON.stringify(String(existing.id))})`;
+
+  preview.innerHTML = `
+    <div style="font-family:'VT323',monospace;color:#ddaa22;font-size:18px;margin-bottom:6px">Comparing with: ${admEsc(existing.title)}</div>
+    <div style="font-family:'VT323',monospace;color:var(--green5);font-size:15px;margin-bottom:8px">${reasons.length ? admEsc(reasons.join(' • ')) : 'Similar enough to review manually.'}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:#0a0804;border:1px solid #aa7700;padding:8px 10px">
+        <div style="font-family:'VT323',monospace;color:var(--green4);font-size:14px;margin-bottom:4px">NEW GENERATED ENTRY</div>
+        <div style="font-family:'VT323',monospace;color:var(--text2);font-size:15px;margin-bottom:6px">${admEsc(admGenerated.summary||'')}</div>
+        <div style="font-family:'VT323',monospace;color:var(--text3);font-size:14px;line-height:1.45;white-space:pre-wrap">${admEsc((admGenerated.content||'').slice(0,320))}${(admGenerated.content||'').length>320?'…':''}</div>
+      </div>
+      <div style="background:#050d05;border:1px solid var(--border);padding:8px 10px">
+        <div style="font-family:'VT323',monospace;color:var(--green4);font-size:14px;margin-bottom:4px">EXISTING WIKI ENTRY</div>
+        <div style="font-family:'VT323',monospace;color:var(--text2);font-size:15px;margin-bottom:6px">${admEsc(existing.summary||'')}</div>
+        <div style="font-family:'VT323',monospace;color:var(--text3);font-size:14px;line-height:1.45;white-space:pre-wrap">${admEsc((existing.content||'').slice(0,320))}${(existing.content||'').length>320?'…':''}</div>
+      </div>
+    </div>
+    <div style="margin-top:8px">
+      <button class="btn" style="border-color:#aa7700;color:#ddaa22" onclick='${openCall}'>OPEN EXISTING ENTRY</button>
+    </div>
+  `;
+  preview.style.display = '';
+}
+
 function admCheckDups(title) {
   const matches = entries.map(e=>({e,s:admSim(title.toLowerCase(),e.title.toLowerCase())})).filter(x=>x.s>0.6).sort((a,b)=>b.s-a.s).slice(0,5);
   const badge = document.getElementById('adm-dup-badge');
+  const preview = document.getElementById('adm-dup-preview');
+  preview.style.display = 'none';
+  preview.innerHTML = '';
   if (matches.length) {
     badge.innerHTML = `<span style="font-family:'VT323',monospace;font-size:14px;padding:2px 8px;border:1px solid #aa7700;color:#ddaa22;background:#0a0804">⚠ ${matches.length} POSSIBLE DUP</span>`;
-    document.getElementById('adm-dup-list').innerHTML = matches.map(m=>`
-      <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:'VT323',monospace;font-size:17px;display:flex;justify-content:space-between">
-        <span style="color:#ddaa22">${admEsc(m.e.title)}</span>
-        <span style="font-size:13px;color:var(--green5)">${Math.round(m.s*100)}%</span>
-      </div>`).join('');
+    document.getElementById('adm-dup-list').innerHTML = matches.map(m=>{
+      const reasons = admDupReasons(admGenerated||{}, m.e, m.s);
+      const safeId = JSON.stringify(String(m.e.id));
+      return `
+      <div onclick='admPreviewDup(${safeId})' style="padding:8px 12px;border-bottom:1px solid var(--border);font-family:'VT323',monospace;cursor:pointer" onmouseover="this.style.background='#120f08'" onmouseout="this.style.background=''">
+        <div style="font-size:17px;display:flex;justify-content:space-between;gap:8px">
+          <span style="color:#ddaa22">${admEsc(m.e.title)}</span>
+          <span style="font-size:13px;color:var(--green5)">${Math.round(m.s*100)}%</span>
+        </div>
+        <div style="font-size:14px;color:var(--green5);margin-top:3px">${admEsc(reasons.join(' • ') || 'Possible overlap')}</div>
+      </div>`;
+    }).join('');
     document.getElementById('adm-dup-section').style.display = '';
   } else {
     badge.innerHTML = `<span style="font-family:'VT323',monospace;font-size:14px;padding:2px 8px;border:1px solid var(--green4);color:var(--green2);background:#050d05">✓ NO DUPS</span>`;
